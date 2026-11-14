@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/// @docImport 'package:flutter/foundation.dart';
+library;
+
 /// The name of the route containing the text field tests.
 const String textFieldRoute = 'textField';
 
@@ -10,3 +13,6 @@ const String normalTextFieldKeyValue = 'textFieldNormal';
 
 /// The string supplied to the [ValueKey] for the password text field.
 const String passwordTextFieldKeyValue = 'passwordField';
+
+/// The string supplied to the [ValueKey] for the page navigation back button.
+const String backButtonKeyValue = 'back';

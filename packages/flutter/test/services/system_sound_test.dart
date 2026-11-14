@@ -9,11 +9,15 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('System sound control test', () async {
-    final List<MethodCall> log = <MethodCall>[];
+    final log = <MethodCall>[];
 
-    SystemChannels.platform.setMockMethodCallHandler((MethodCall methodCall) async {
-      log.add(methodCall);
-    });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (MethodCall methodCall) async {
+        log.add(methodCall);
+        return null;
+      },
+    );
 
     await SystemSound.play(SystemSoundType.click);
 

@@ -2,86 +2,176 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import 'dart:isolate';
+
 import 'package:meta/meta.dart';
-// TODO(bkonyi): remove deprecated member usage, https://github.com/flutter/flutter/issues/51951
-// ignore: deprecated_member_use
-import 'package:package_config/packages_file.dart' as packages_file;
+import 'package:package_config/package_config.dart';
 
+import '../base/common.dart';
 import '../base/file_system.dart';
-import '../globals.dart' as globals hide fs;
+import '../base/logger.dart';
+import '../base/platform.dart';
+import '../context/tool_context.dart';
 
-const String kPackagesFileName = '.packages';
+/// Whether to ignore [Isolate.packageConfigSync] and force the fallback
+/// path in [currentPackageConfig].
+@visibleForTesting
+bool debugIgnorePackageConfigSync = false;
 
-Map<String, Uri> _parse(String packagesPath, FileSystem fileSystem) {
-  final List<int> source = fileSystem.file(packagesPath).readAsBytesSync();
-  return packages_file.parse(source,
-      Uri.file(packagesPath, windows: globals.platform.isWindows));
+const String _fileScheme = 'file';
+
+/// Loads the package configuration of the current isolate.
+Future<PackageConfig> currentPackageConfig({required ToolContext toolContext}) async {
+  final Uri? packageConfigUri = debugIgnorePackageConfigSync ? null : Isolate.packageConfigSync;
+  if (packageConfigUri != null) {
+    return loadPackageConfigUri(packageConfigUri);
+  }
+
+  final ToolContext(:FileSystem fs, :Logger logger, :Platform platform) = toolContext;
+  final Directory cwd = fs.currentDirectory;
+  File? packageConfigFile = findPackageConfigFile(cwd);
+
+  if (packageConfigFile == null) {
+    final Uri scriptUri = platform.script;
+    if (scriptUri.scheme == _fileScheme) {
+      final File scriptFile = fs.file(scriptUri);
+      packageConfigFile = findPackageConfigFile(scriptFile.parent);
+    }
+  }
+
+  if (packageConfigFile == null) {
+    throwToolExit(
+      'Failed to resolve package configuration.\n'
+      'Isolate.packageConfigSync was null, and no .dart_tool/package_config.json '
+      'could be found in the current working directory (${cwd.path}) or '
+      'relative to the script (${platform.script}).\n'
+      'Did you run "flutter pub get"?',
+    );
+  }
+
+  return loadPackageConfigWithLogging(packageConfigFile, logger: logger);
 }
 
-class PackageMap {
-  PackageMap(this.packagesPath, {
-    @required FileSystem fileSystem,
-  }) : _fileSystem = fileSystem;
+/// Locates the `.dart_tool/package_config.json` relevant to [dir].
+///
+/// Searches [dir] and all parent directories.
+///
+/// Returns `null` if no package_config.json was found.
+// TODO(sigurdm): Only call this once per run - and read in from BuildInfo.
+File? findPackageConfigFile(Directory dir) {
+  final FileSystem fileSystem = dir.fileSystem;
+  Directory candidateDir = fileSystem.directory(fileSystem.path.normalize(dir.absolute.path));
 
-  /// Create a [PackageMap] for testing.
-  PackageMap.test(Map<String, Uri> input, {
-    @required FileSystem fileSystem,
-  }) : packagesPath = '.packages',
-       _map = input,
-       _fileSystem = fileSystem;
-
-  final FileSystem _fileSystem;
-
-  static String get globalPackagesPath => _globalPackagesPath ?? kPackagesFileName;
-
-  static set globalPackagesPath(String value) {
-    _globalPackagesPath = value;
-  }
-
-  static bool get isUsingCustomPackagesPath => _globalPackagesPath != null;
-
-  static String _globalPackagesPath;
-
-  final String packagesPath;
-
-  /// Load and parses the .packages file.
-  void load() {
-    _map ??= _parse(packagesPath, _fileSystem);
-  }
-
-  Map<String, Uri> get map {
-    load();
-    return _map;
-  }
-  Map<String, Uri> _map;
-
-  /// Returns the path to [packageUri].
-  String pathForPackage(Uri packageUri) => uriForPackage(packageUri).path;
-
-  /// Returns the path to [packageUri] as URL.
-  Uri uriForPackage(Uri packageUri) {
-    assert(packageUri.scheme == 'package');
-    final List<String> pathSegments = packageUri.pathSegments.toList();
-    final String packageName = pathSegments.removeAt(0);
-    final Uri packageBase = map[packageName];
-    if (packageBase == null) {
+  while (true) {
+    final File candidatePackageConfigFile = candidateDir
+        .childDirectory('.dart_tool')
+        .childFile('package_config.json');
+    if (candidatePackageConfigFile.existsSync()) {
+      return candidatePackageConfigFile;
+    }
+    final Directory parentDir = candidateDir.parent;
+    if (fileSystem.path.equals(parentDir.path, candidateDir.path)) {
       return null;
     }
-    final String packageRelativePath = _fileSystem.path.joinAll(pathSegments);
-    return packageBase.resolveUri(_fileSystem.path.toUri(packageRelativePath));
+    candidateDir = parentDir;
   }
+}
 
-  String checkValid() {
-    if (_fileSystem.isFileSync(packagesPath)) {
+/// Locates the `.dart_tool/package_config.json` relevant to [dir].
+///
+/// Like [findPackageConfigFile] but returns
+/// `$dir/.dart_tool/package_config.json` if no package config could be found.
+File findPackageConfigFileOrDefault(Directory dir) {
+  return findPackageConfigFile(dir) ??
+      dir.childDirectory('.dart_tool').childFile('package_config.json');
+}
+
+/// Load the package configuration from [file] or throws a [ToolExit]
+/// if the operation would fail.
+///
+/// If [throwOnError] is false, in the event of an error an empty package
+/// config is returned.
+Future<PackageConfig> loadPackageConfigWithLogging(
+  File file, {
+  required Logger logger,
+  bool throwOnError = true,
+}) async {
+  final FileSystem fileSystem = file.fileSystem;
+  var didError = false;
+  final PackageConfig result = await loadPackageConfigUri(
+    file.absolute.uri,
+    loader: (Uri uri) async {
+      final File configFile = fileSystem.file(uri);
+      if (!configFile.existsSync()) {
+        return null;
+      }
+      return configFile.readAsBytes();
+    },
+    onError: (Object? error) {
+      if (!throwOnError) {
+        return;
+      }
+      logger.printTrace(error.toString());
+      final String message;
+      if (file.existsSync()) {
+        message =
+            'The package configuration file ${file.path} is invalid: $error\n'
+            'Try running "flutter pub get" to regenerate it.';
+      } else {
+        var notFoundMessage = '${file.path} does not exist.';
+        final String pubspecPath = fileSystem.path.absolute(
+          fileSystem.path.dirname(file.path),
+          'pubspec.yaml',
+        );
+        if (fileSystem.isFileSync(pubspecPath)) {
+          notFoundMessage += '\nDid you run "flutter pub get" in this directory?';
+        } else {
+          notFoundMessage +=
+              '\nDid you run this command from the same directory as your pubspec.yaml file?';
+        }
+        message = notFoundMessage;
+      }
+      logger.printError(message);
+      didError = true;
+    },
+  );
+  if (didError) {
+    throwToolExit('');
+  }
+  return result;
+}
+
+extension PackageConfigWorkspaceExtension on PackageConfig {
+  /// Converts a [fileUri] to a `package:` URI, finding the most specific
+  /// package whose [Package.packageUriRoot] is a prefix of [fileUri].
+  ///
+  /// The default [PackageConfig.toPackageUri] may match an outer package first
+  /// when pub workspace member packages are located under the workspace root
+  /// package's `lib/` directory.
+  Uri? toPackageUriForWorkspace(Uri fileUri) {
+    if (fileUri.isScheme('package')) {
+      return fileUri;
+    }
+    final path = fileUri.toString();
+    Package? bestMatch;
+    String? bestMatchRoot;
+
+    for (final Package package in packages) {
+      final rootPath = package.packageUriRoot.toString();
+      final rootPathWithSlash = rootPath.endsWith('/') ? rootPath : '$rootPath/';
+      if (path.startsWith(rootPathWithSlash)) {
+        if (bestMatchRoot == null || rootPathWithSlash.length > bestMatchRoot.length) {
+          bestMatch = package;
+          bestMatchRoot = rootPathWithSlash;
+        }
+      }
+    }
+
+    if (bestMatch == null || bestMatchRoot == null) {
       return null;
     }
-    String message = '$packagesPath does not exist.';
-    final String pubspecPath = _fileSystem.path.absolute(_fileSystem.path.dirname(packagesPath), 'pubspec.yaml');
-    if (_fileSystem.isFileSync(pubspecPath)) {
-      message += '\nDid you run "flutter pub get" in this directory?';
-    } else {
-      message += '\nDid you run this command from the same directory as your pubspec.yaml file?';
-    }
-    return message;
+
+    final String rest = path.substring(bestMatchRoot.length);
+    return Uri(scheme: 'package', path: '${bestMatch.name}/$rest');
   }
 }

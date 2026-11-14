@@ -1,4 +1,20 @@
 {
+  "expansionTileExpandedHint": "toucher deux fois pour réduire",
+  "collapsedHint": "Développé",
+  "expandedHint": "Réduit",
+  "expansionTileCollapsedTapHint": "Développer le panneau pour plus de détails",
+  "expansionTileExpandedTapHint": "Réduire",
+  "expansionTileCollapsedHint": "toucher deux fois pour développer",
+  "cancelButtonLabel": "Annuler",
+  "backButtonLabel": "Retour",
+  "clearButtonLabel": "Effacer",
+  "lookUpButtonLabel": "Regarder en haut",
+  "searchWebButtonLabel": "Rechercher sur le Web",
+  "shareButtonLabel": "Partager…",
+  "noSpellCheckReplacementsLabel": "Aucun remplacement trouvé",
+  "menuDismissLabel": "Ignorer le menu",
+  "searchTextFieldPlaceholderLabel": "Rechercher",
+  "tabSemanticsLabel": "Onglet $tabIndex sur $tabCount",
   "datePickerHourSemanticsLabelOne": "$hour heure",
   "datePickerHourSemanticsLabelOther": "$hour heures",
   "datePickerMinuteSemanticsLabelOne": "1 minute",
@@ -18,5 +34,6 @@
   "cutButtonLabel": "Couper",
   "copyButtonLabel": "Copier",
   "pasteButtonLabel": "Coller",
-  "selectAllButtonLabel": "Tout sélectionner"
+  "selectAllButtonLabel": "Tout sélectionner",
+  "modalBarrierDismissLabel": "Ignorer"
 }

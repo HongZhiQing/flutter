@@ -3,13 +3,10 @@
 // found in the LICENSE file.
 
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
-
-import 'image_data.dart';
 
 class TestImageProvider extends ImageProvider<TestImageProvider> {
   TestImageProvider(this.testImage);
@@ -17,7 +14,7 @@ class TestImageProvider extends ImageProvider<TestImageProvider> {
   final ui.Image testImage;
 
   final Completer<ImageInfo> _completer = Completer<ImageInfo>.sync();
-  ImageConfiguration configuration;
+  ImageConfiguration? configuration;
   int loadCallCount = 0;
 
   @override
@@ -26,19 +23,29 @@ class TestImageProvider extends ImageProvider<TestImageProvider> {
   }
 
   @override
-  void resolveStreamForKey(ImageConfiguration config, ImageStream stream, TestImageProvider key, ImageErrorListener handleError) {
+  void resolveStreamForKey(
+    ImageConfiguration config,
+    ImageStream stream,
+    TestImageProvider key,
+    ImageErrorListener handleError,
+  ) {
     configuration = config;
     super.resolveStreamForKey(config, stream, key, handleError);
   }
 
   @override
-  ImageStreamCompleter load(TestImageProvider key, DecoderCallback decode) {
+  ImageStreamCompleter loadBuffer(TestImageProvider key, DecoderBufferCallback decode) {
+    throw UnsupportedError('Use ImageProvider.loadImage instead.');
+  }
+
+  @override
+  ImageStreamCompleter loadImage(TestImageProvider key, ImageDecoderCallback decode) {
     loadCallCount += 1;
     return OneFrameImageStreamCompleter(_completer.future);
   }
 
   ImageInfo complete() {
-    final ImageInfo imageInfo = ImageInfo(image: testImage);
+    final imageInfo = ImageInfo(image: testImage);
     _completer.complete(imageInfo);
     return imageInfo;
   }
@@ -47,13 +54,21 @@ class TestImageProvider extends ImageProvider<TestImageProvider> {
   String toString() => '${describeIdentity(this)}()';
 }
 
-Future<ui.Image> createTestImage() {
-  final Completer<ui.Image> uiImage = Completer<ui.Image>();
-  ui.decodeImageFromList(Uint8List.fromList(kTransparentImage), uiImage.complete);
-  return uiImage.future;
+/// An [ImageStream] subclass returned by [CustomStreamImageProvider.createStream].
+class CustomImageStream extends ImageStream {
+  CustomImageStream(this.configuration);
+
+  /// The configuration passed to [CustomStreamImageProvider.createStream].
+  final ImageConfiguration configuration;
 }
 
-class FakeImageConfiguration implements ImageConfiguration {
+/// An image provider that returns a [CustomImageStream] from [createStream].
+///
+/// Its key never resolves, so it never loads.
+class CustomStreamImageProvider extends ImageProvider<Object> {
   @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  Future<Object> obtainKey(ImageConfiguration configuration) => Completer<Object>().future;
+
+  @override
+  ImageStream createStream(ImageConfiguration configuration) => CustomImageStream(configuration);
 }

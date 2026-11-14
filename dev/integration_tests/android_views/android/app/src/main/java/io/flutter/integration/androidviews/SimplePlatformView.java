@@ -6,8 +6,14 @@ package io.flutter.integration.platformviews;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.graphics.PixelFormat;
+import android.util.Log;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import io.flutter.plugin.common.MethodCall;
@@ -15,21 +21,21 @@ import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.platform.PlatformView;
 
 public class SimplePlatformView implements PlatformView, MethodChannel.MethodCallHandler {
-    private final View view;
+    private final FrameLayout view;
     private final MethodChannel methodChannel;
-    private final io.flutter.integration.platformviews.TouchPipe touchPipe;
+    private final TouchPipe touchPipe;
 
     SimplePlatformView(Context context, MethodChannel methodChannel) {
         this.methodChannel = methodChannel;
-        view = new View(context) {
+        view = new FrameLayout(context) {
             @Override
             public boolean onTouchEvent(MotionEvent event) {
-                return super.onTouchEvent(event);
+                return true;
             }
         };
         view.setBackgroundColor(0xff0000ff);
         this.methodChannel.setMethodCallHandler(this);
-        touchPipe = new io.flutter.integration.platformviews.TouchPipe(this.methodChannel, view);
+        touchPipe = new TouchPipe(this.methodChannel, view);
     }
 
     @Override
@@ -43,7 +49,7 @@ public class SimplePlatformView implements PlatformView, MethodChannel.MethodCal
 
     @Override
     public void onMethodCall(MethodCall methodCall, MethodChannel.Result result) {
-        switch(methodCall.method) {
+         switch (methodCall.method) {
             case "pipeTouchEvents":
                 touchPipe.enable();
                 result.success(null);
@@ -55,6 +61,10 @@ public class SimplePlatformView implements PlatformView, MethodChannel.MethodCal
             case "showAndHideAlertDialog":
                 showAndHideAlertDialog(result);
                 return;
+            case "addWindowAndWaitForClick":
+                addWindow(result);
+                return;
+
         }
         result.notImplemented();
     }
@@ -73,6 +83,20 @@ public class SimplePlatformView implements PlatformView, MethodChannel.MethodCal
                 alertDialog.hide();
             }
         }, 1000);
+    }
+
+    private void addWindow(final MethodChannel.Result result) {
+        Context context = view.getContext();
+        final Button button = new Button(context);
+        button.setText("This view is added as a window");
+        final WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        WindowManager.LayoutParams layoutParams = new WindowManager.LayoutParams(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, 0, PixelFormat.OPAQUE);
+        layoutParams.gravity = Gravity.FILL;
+        windowManager.addView(button, layoutParams);
+        button.setOnClickListener(v -> {
+            windowManager.removeView(button);
+            result.success(null);
+        });
     }
 
 }

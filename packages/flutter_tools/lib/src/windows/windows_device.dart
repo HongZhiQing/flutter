@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'package:meta/meta.dart';
+import 'dart:async';
 
-import '../base/io.dart';
-import '../base/process.dart';
+import 'package:unified_analytics/unified_analytics.dart';
+
+import '../base/file_system.dart';
+import '../base/os.dart';
 import '../build_info.dart';
+import '../context/tool_context.dart';
 import '../desktop_device.dart';
 import '../device.dart';
-import '../globals.dart' as globals;
 import '../project.dart';
 import 'application_package.dart';
 import 'build_windows.dart';
@@ -17,20 +19,30 @@ import 'windows_workflow.dart';
 
 /// A device that represents a desktop Windows target.
 class WindowsDevice extends DesktopDevice {
-  WindowsDevice() : super(
-      'Windows',
-      platformType: PlatformType.windows,
-      ephemeral: false,
-  );
+  WindowsDevice({required this._analytics, required super.toolContext})
+    : super('windows', platformType: PlatformType.windows, ephemeral: false);
+
+  final Analytics _analytics;
 
   @override
-  bool isSupported() => true;
+  Future<bool> isSupported() async => true;
+
+  @override
+  bool get supportsFlavors => true;
 
   @override
   String get name => 'Windows';
 
   @override
-  Future<TargetPlatform> get targetPlatform async => TargetPlatform.windows_x64;
+  Future<TargetPlatform> get targetPlatform async => _targetPlatform;
+
+  TargetPlatform get _targetPlatform => switch (toolContext.os.hostPlatform) {
+    HostPlatform.windows_arm64 => TargetPlatform.windows_arm64,
+    _ => TargetPlatform.windows_x64,
+  };
+
+  @override
+  Future<CpuArch> get cpuArch async => toolContext.os.hostPlatform.cpuArch;
 
   @override
   bool isSupportedForProject(FlutterProject flutterProject) {
@@ -38,79 +50,58 @@ class WindowsDevice extends DesktopDevice {
   }
 
   @override
-  Future<void> buildForDevice(
-    covariant WindowsApp package, {
-    String mainPath,
-    BuildInfo buildInfo,
+  Future<void> buildForDevice({
+    String? mainPath,
+    required BuildInfo buildInfo,
+    bool usingCISystem = false,
   }) async {
+    final ToolContext(:FileSystem fs, :FlutterProjectFactory projectFactory) = toolContext;
     await buildWindows(
-      FlutterProject.current().windows,
+      projectFactory.fromDirectory(fs.currentDirectory).windows,
       buildInfo,
+      _targetPlatform,
+      analytics: _analytics,
       target: mainPath,
+      toolContext: toolContext,
     );
   }
 
   @override
-  String executablePathForDevice(covariant WindowsApp package, BuildMode buildMode) {
-    return package.executable(buildMode);
+  String executablePathForDevice(covariant WindowsApp package, BuildInfo buildInfo) {
+    return package.executable(buildInfo.mode, _targetPlatform, buildInfo.flavor);
   }
 }
 
 class WindowsDevices extends PollingDeviceDiscovery {
-  WindowsDevices() : super('windows devices');
+  WindowsDevices({
+    required this._analytics,
+    required ToolContext super.toolContext,
+    required this._windowsWorkflow,
+  }) : super('windows devices');
+
+  final Analytics _analytics;
+  final WindowsWorkflow _windowsWorkflow;
 
   @override
-  bool get supportsPlatform => globals.platform.isWindows;
+  bool get supportsPlatform => _windowsWorkflow.appliesToHostPlatform;
 
   @override
-  bool get canListAnything => windowsWorkflow.canListDevices;
+  bool get canListAnything => _windowsWorkflow.canListDevices;
 
   @override
-  Future<List<Device>> pollingGetDevices({ Duration timeout }) async {
+  Future<List<Device>> pollingGetDevices({
+    Duration? timeout,
+    bool forWirelessDiscovery = false,
+  }) async {
     if (!canListAnything) {
       return const <Device>[];
     }
-    return <Device>[
-      WindowsDevice(),
-    ];
+    return <Device>[WindowsDevice(analytics: _analytics, toolContext: toolContext)];
   }
 
   @override
   Future<List<String>> getDiagnostics() async => const <String>[];
-}
 
-final RegExp _whitespace = RegExp(r'\s+');
-
-/// Returns the running process matching `process` name.
-///
-/// This list contains the process name and id.
-@visibleForTesting
-List<String> runningProcess(String processName) {
-  // TODO(jonahwilliams): find a way to do this without powershell.
-  final RunResult result = processUtils.runSync(
-    <String>['powershell', '-script="Get-CimInstance Win32_Process"'],
-  );
-  if (result.exitCode != 0) {
-    return null;
-  }
-  for (final String rawProcess in result.stdout.split('\n')) {
-    final String process = rawProcess.trim();
-    if (!process.contains(processName)) {
-      continue;
-    }
-    final List<String> parts = process.split(_whitespace);
-
-    final String processPid = parts[0];
-    final String currentRunningProcessPid = pid.toString();
-    // Don't kill the flutter tool process
-    if (processPid == currentRunningProcessPid) {
-      continue;
-    }
-    final List<String> data = <String>[
-      processPid, // ID
-      parts[1], // Name
-    ];
-    return data;
-  }
-  return null;
+  @override
+  List<String> get wellKnownIds => const <String>['windows'];
 }

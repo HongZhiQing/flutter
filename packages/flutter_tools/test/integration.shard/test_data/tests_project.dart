@@ -2,20 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 import 'package:file/file.dart';
 import 'package:flutter_tools/src/base/file_system.dart';
-import 'package:flutter_tools/src/globals.dart' as globals;
 
 import '../test_utils.dart';
 import 'project.dart';
 
 class TestsProject extends Project {
   @override
-  final String pubspec = '''
+  final pubspec = '''
   name: test
   environment:
-    sdk: ">=2.0.0-dev.68.0 <3.0.0"
+    sdk: ^3.7.0-0
 
   dependencies:
     flutter:
@@ -29,24 +27,29 @@ class TestsProject extends Project {
   @override
   String get main => '// Unused';
 
-  final String testContent = r'''
+  final testContent = r'''
   import 'package:flutter_test/flutter_test.dart';
 
   void main() {
-    testWidgets('Hello world test', (WidgetTester tester) async {
-      expect(true, isTrue); // BREAKPOINT
+    group('Flutter tests', () {
+      testWidgets('can pass', (WidgetTester tester) async {
+        expect(true, isTrue); // BREAKPOINT
+      });
+      testWidgets('can fail', (WidgetTester tester) async {
+        expect(true, isFalse);
+      });
     });
   }
   ''';
 
   @override
-  Future<void> setUpIn(Directory dir) {
+  Future<void> setUpIn(Directory dir, {bool generateMain = true}) {
     this.dir = dir;
     writeFile(testFilePath, testContent);
-    return super.setUpIn(dir);
+    return super.setUpIn(dir, generateMain: generateMain);
   }
 
-  String get testFilePath => globals.fs.path.join(dir.path, 'test', 'test.dart');
+  String get testFilePath => fileSystem.path.join(dir.path, 'test', 'test.dart');
 
   Uri get breakpointUri => Uri.file(testFilePath);
   Uri get breakpointAppUri => Uri.parse('org-dartlang-app:///test.dart');
